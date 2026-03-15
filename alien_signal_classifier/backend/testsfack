@@ -1,30 +1,25 @@
-import tensorflow as tf
+[15.03.2026 13:18] Нколаc: import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
-from sklearn.utils.class_weight import compute_class_weight
-import warnings
-warnings.filterwarnings('ignore')
-
-# Дополнительные импорты
-from sklearn.metrics import roc_auc_score, f1_score, classification_report
+import pandas as pd
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 import json
 import os
 import joblib
-from scipy import signal
+from scipy import signal as sp_signal  # Исправлен импорт для избежания конфликтов
 from scipy.stats import entropy
+import warnings
+
+warnings.filterwarnings('ignore')
 
 class EnhancedSignalClassifier:
-    """
-    Улучшенный классификатор сигналов с дополнительными функциями
-    """
-    
-    def __init__(self, input_shape=None, num_classes=None):
+    def init(self, input_shape=None, num_classes=None):  # Исправлено на init
         self.input_shape = input_shape
         self.num_classes = num_classes
         self.model = None
@@ -32,69 +27,35 @@ class EnhancedSignalClassifier:
         self.scaler = None
         self.label_encoder = None
         self.class_names = None
-        self.training_log = []
-        
+
     def create_advanced_network(self, input_shape, num_classes):
-        """
-        Создание продвинутой архитектуры с несколькими улучшениями
-        """
         inputs = keras.Input(shape=input_shape)
-        
-        # Начальная нормализация
         x = layers.BatchNormalization()(inputs)
         
-        # Несколько параллельных путей для захвата разных масштабов признаков
-        # Путь 1: Мелкомасштабные признаки (маленькое ядро)
-        path1 = layers.Conv1D(filters=32, kernel_size=3, padding='same')(x)
-        path1 = layers.BatchNormalization()(path1)
-        path1 = layers.Activation('relu')(path1)
-        path1 = layers.Conv1D(filters=32, kernel_size=3, padding='same')(path1)
-        path1 = layers.BatchNormalization()(path1)
-        path1 = layers.Activation('relu')(path1)
+        # Parallel Inception-like paths
+        path1 = layers.Conv1D(32, 3, padding='same', activation='relu')(x)
+        path2 = layers.Conv1D(32, 7, padding='same', activation='relu')(x)
+        path3 = layers.Conv1D(32, 11, padding='same', activation='relu')(x)
         
-        # Путь 2: Среднемасштабные признаки
-        path2 = layers.Conv1D(filters=32, kernel_size=7, padding='same')(x)
-        path2 = layers.BatchNormalization()(path2)
-        path2 = layers.Activation('relu')(path2)
-        path2 = layers.Conv1D(filters=32, kernel_size=7, padding='same')(path2)
-        path2 = layers.BatchNormalization()(path2)
-        path2 = layers.Activation('relu')(path2)
-        
-        # Путь 3: Крупномасштабные признаки
-        path3 = layers.Conv1D(filters=32, kernel_size=11, padding='same')(x)
-        path3 = layers.BatchNormalization()(path3)
-        path3 = layers.Activation('relu')(path3)
-        path3 = layers.Conv1D(filters=32, kernel_size=11, padding='same')(path3)
-        path3 = layers.BatchNormalization()(path3)
-        path3 = layers.Activation('relu')(path3)
-        
-        # Объединение путей
         x = layers.Concatenate()([path1, path2, path3])
         x = layers.MaxPooling1D(pool_size=2)(x)
-        x = layers.Dropout(0.1)(x)
         
-        # Блок с расширенными остаточными связями
-        for filters in [64, 128, 256, 512]:
-            # Сохраняем для остаточной связи
+        # Residual blocks with Squeeze-and-Excitation
+        for filters in [64, 128, 256]:
             shortcut = x
-            
-            # Основной путь
-            x = layers.Conv1D(filters=filters, kernel_size=3, padding='same')(x)
+            x = layers.Conv1D(filters, 3, padding='same')(x)
             x = layers.BatchNormalization()(x)
             x = layers.Activation('relu')(x)
-            
-            x = layers.Conv1D(filters=filters, kernel_size=3, padding='same')(x)
+            x = layers.Conv1D(filters, 3, padding='same')(x)
             x = layers.BatchNormalization()(x)
             
-            # Адаптация shortcut если нужно
             if shortcut.shape[-1] != filters:
-                shortcut = layers.Conv1D(filters=filters, kernel_size=1)(shortcut)
+                shortcut = layers.Conv1D(filters, 1)(shortcut)
             
-            # Остаточная связь
             x = layers.Add()([x, shortcut])
             x = layers.Activation('relu')(x)
             
-            # Squeeze-and-Excitation блок
+            # SE Block
             se = layers.GlobalAveragePooling1D()(x)
             se = layers.Dense(filters // 4, activation='relu')(se)
             se = layers.Dense(filters, activation='sigmoid')(se)
@@ -102,674 +63,121 @@ class EnhancedSignalClassifier:
             x = layers.Multiply()([x, se])
             
             x = layers.MaxPooling1D(pool_size=2)(x)
-            x = layers.Dropout(0.2)(x)
-        
-        # Глобальный пулинг
+
         x = layers.GlobalAveragePooling1D()(x)
         
-        # Внимание на уровне признаков
-        attention = layers.Dense(512, activation='tanh')(x)
-        attention = layers.Dense(512, activation='sigmoid')(attention)
-        x = layers.Multiply()([x, attention])
-        
-        # Классификационная головка
-        x = layers.Dense(1024, kernel_regularizer=keras.regularizers.l1_l2(l1=0.0001, l2=0.0001))(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.Activation('relu')(x)
-        x = layers.Dropout(0.5)(x)
-        
-        x = layers.Dense(512, kernel_regularizer=keras.regularizers.l1_l2(l1=0.0001, l2=0.0001))(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.Activation('relu')(x)
+        # Classifier head
+        x = layers.Dense(512, activation='relu')(x)
         x = layers.Dropout(0.4)(x)
-        
-        x = layers.Dense(256, kernel_regularizer=keras.regularizers.l1_l2(l1=0.0001, l2=0.0001))(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.Activation('relu')(x)
-        x = layers.Dropout(0.3)(x)
-        
         outputs = layers.Dense(num_classes, activation='softmax')(x)
         
         model = keras.Model(inputs=inputs, outputs=outputs)
         return model
-    
-    def train_with_cv(self, X, y, n_splits=5, epochs=150, batch_size=32):
-        """
-        Обучение с кросс-валидацией
-        """
-        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-        cv_scores = []
-        cv_models = []
-        
-        # Кодирование меток если необходимо
-        if self.label_encoder is None:
-            self.label_encoder = LabelEncoder()
-            y_encoded = self.label_encoder.fit_transform(y)
-        else:
-            y_encoded = self.label_encoder.transform(y)
-        
-        for fold, (train_idx, val_idx) in enumerate(skf.split(X, y_encoded)):
-            print(f"\n{'='*50}")
-            print(f"Fold {fold + 1}/{n_splits}")
-            print(f"{'='*50}")
-            
-            X_train, X_val = X[train_idx], X[val_idx]
-            y_train, y_val = y_encoded[train_idx], y_encoded[val_idx]
-            
-            # Нормализация для этого фолда
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(
-                X_train.reshape(-1, X_train.shape[-1])
-            ).reshape(X_train.shape)
-            X_val_scaled = scaler.transform(
-                X_val.reshape(-1, X_val.shape[-1])
-            ).reshape(X_val.shape)
-            
-            # Создание и обучение модели
-            model = self.create_advanced_network(X.shape[1:], len(np.unique(y_encoded)))
-            
-            # Компиляция
-            optimizer = keras.optimizers.AdamW(
-                learning_rate=0.001,
-                weight_decay=0.0001
-            )
-            
-            model.compile(
-                optimizer=optimizer,
-                loss='sparse_categorical_crossentropy',
-                metrics=['accuracy', keras.metrics.AUC(name='auc')]
-            )
-            
-            # Колбэки
-            callbacks = [
-                keras.callbacks.EarlyStopping(
-                    monitor='val_loss',
-                    patience=15,
-                    restore_best_weights=True,
-                    verbose=0
-                ),
-                keras.callbacks.ReduceLROnPlateau(
-                    monitor='val_loss',
-                    factor=0.5,
-                    patience=7,
-                    min_lr=0.00001,
-                    verbose=0
-                )
-            ]
-            
-            # Обучение
-            history = model.fit(
-                X_train_scaled, y_train,
-                validation_data=(X_val_scaled, y_val),
-                epochs=epochs,
-                batch_size=batch_size,
-                callbacks=callbacks,
-                verbose=0
-            )
-            
-            # Оценка
-            val_loss, val_acc, val_auc = model.evaluate(X_val_scaled, y_val, verbose=0)
-            cv_scores.append({
-                'fold': fold,
-                'val_accuracy': val_acc,
-                'val_auc': val_auc,
-                'val_loss': val_loss
-            })
-            
-            cv_models.append((model, scaler))
-            
-            print(f"Fold {fold + 1} - Accuracy: {val_acc:.4f}, AUC: {val_auc:.4f}")
-        
-        # Вывод результатов CV
-        print("\n" + "="*50)
-        print("РЕЗУЛЬТАТЫ КРОСС-ВАЛИДАЦИИ")
-        print("="*50)
-        mean_acc = np.mean([score['val_accuracy'] for score in cv_scores])
-        std_acc = np.std([score['val_accuracy'] for score in cv_scores])
-        mean_auc = np.mean([score['val_auc'] for score in cv_scores])
-        std_auc = np.std([score['val_auc'] for score in cv_scores])
-        
-        print(f"Средняя точность: {mean_acc:.4f} ± {std_acc:.4f}")
-        print(f"Средний AUC: {mean_auc:.4f} ± {std_auc:.4f}")
-        
-        return cv_models, cv_scores
-    
-    def ensemble_predict(self, models_list, X, weights=None):
-        """
-        Ансамблевое предсказание
-        """
-        if weights is None:
-            weights = [1/len(models_list)] * len(models_list)
-        
-        predictions = []
-        for (model, scaler), weight in zip(models_list, weights):
-            X_scaled = scaler.transform(X.reshape(-1, X.shape[-1])).reshape(X.shape)
-            pred = model.predict(X_scaled, verbose=0)
-            predictions.append(pred * weight)
-        
-        ensemble_pred = np.sum(predictions, axis=0)
-        return ensemble_pred
-    
-    def plot_training_history(self, history):
-        """
-        Визуализация истории обучения
-        """
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        
-        # Потери
-        axes[0, 0].plot(history.history['loss'], label='Train Loss', linewidth=2)
-        axes[0, 0].plot(history.history['val_loss'], label='Val Loss', linewidth=2)
-        axes[0, 0].set_title('Потери модели', fontsize=14, fontweight='bold')
-        axes[0, 0].set_xlabel('Эпоха', fontsize=12)
-        axes[0, 0].set_ylabel('Потери', fontsize=12)
-        axes[0, 0].legend(fontsize=10)
-        axes[0, 0].grid(True, alpha=0.3)
-        
-        # Точность
-        axes[0, 1].plot(history.history['accuracy'], label='Train Accuracy', linewidth=2)
-        axes[0, 1].plot(history.history['val_accuracy'], label='Val Accuracy', linewidth=2)
-        axes[0, 1].set_title('Точность модели', fontsize=14, fontweight='bold')
-        axes[0, 1].set_xlabel('Эпоха', fontsize=12)
-        axes[0, 1].set_ylabel('Точность', fontsize=12)
-        axes[0, 1].legend(fontsize=10)
-        axes[0, 1].grid(True, alpha=0.3)
-        
-        # AUC
-        if 'auc' in history.history:
-            axes[1, 0].plot(history.history['auc'], label='Train AUC', linewidth=2)
-            axes[1, 0].plot(history.history['val_auc'], label='Val AUC', linewidth=2)
-            axes[1, 0].set_title('AUC модели', fontsize=14, fontweight='bold')
-            axes[1, 0].set_xlabel('Эпоха', fontsize=12)
-            axes[1, 0].set_ylabel('AUC', fontsize=12)
-            axes[1, 0].legend(fontsize=10)
-            axes[1, 0].grid(True, alpha=0.3)
-        
-        # Learning rate
-        if 'lr' in history.history:
-            axes[1, 1].plot(history.history['lr'], linewidth=2, color='green')
-            axes[1, 1].set_title('Learning Rate', fontsize=14, fontweight='bold')
-            axes[1, 1].set_xlabel('Эпоха', fontsize=12)
-            axes[1, 1].set_ylabel('LR', fontsize=12)
-            axes[1, 1].grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig('training_history.png', dpi=150, bbox_inches='tight')
-        plt.show()
-        
-        return fig
-    
-    def save_model_package(self, filepath):
-        """
-        Сохранение полного пакета модели
-        """
+
+    def predict_signal(self, sig, return_proba=False):
         if self.model is None:
             raise ValueError("Модель не обучена")
         
-        # Создаем директорию если её нет
-        os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else '.', exist_ok=True)
-        
-        # Сохраняем модель в H5 формат
-        model_path = f"{filepath}_model.h5"
-        self.model.save(model_path)
-        
-        # Сохраняем метаданные
-        metadata = {
-            'scaler': self.scaler,
-            'label_encoder': self.label_encoder,
-            'class_names': self.class_names,
-            'input_shape': self.input_shape,
-            'num_classes': self.num_classes,
-            'metadata': {
-                'created': datetime.now().isoformat(),
-                'framework': 'tensorflow',
-                'version': tf.__version__
-            }
-        }
-        
-        # Сохраняем метаданные
-        joblib.dump(metadata, f"{filepath}_metadata.pkl")
-        
-        # Сохраняем историю обучения если есть
-        if self.history:
-            with open(f"{filepath}_history.json", 'w') as f:
-                json.dump(self.history.history, f)
-        
-        print(f"Модель сохранена в {model_path}")
-        print(f"Метаданные сохранены в {filepath}_metadata.pkl")
-    
-    def load_model_package(self, filepath):
-        """
-        Загрузка полного пакета модели
-        """
-        # Загружаем модель
-        model_path = f"{filepath}_model.h5"
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Файл модели {model_path} не найден")
-        
-        self.model = keras.models.load_model(model_path)
-        
-        # Загружаем метаданные
-        metadata_path = f"{filepath}_metadata.pkl"
-        if os.path.exists(metadata_path):
-            metadata = joblib.load(metadata_path)
-            self.scaler = metadata['scaler']
-            self.label_encoder = metadata.get('label_encoder')
-            self.class_names = metadata.get('class_names')
-            self.input_shape = metadata['input_shape']
-            self.num_classes = metadata['num_classes']
-        
-        # Загружаем историю если есть
-        history_path = f"{filepath}_history.json"
-        if os.path.exists(history_path):
-            with open(history_path, 'r') as f:
-                history_dict = json.load(f)
-                self.history = type('History', (), {'history': history_dict})()
-        
-        print(f"Модель загружена из {model_path}")
-        return self
-    
-    def predict_signal(self, signal, return_proba=False):
-        """
-        Предсказание для одного сигнала
-        """
-        if self.model is None:
-            raise ValueError("Модель не загружена")
-        
-        # Приводим к правильной форме
-        if len(signal.shape) == 1:
-            signal = signal.reshape(1, -1)
-        
-        # Масштабируем
-        if self.scaler:
-            signal_scaled = self.scaler.transform(
-                signal.reshape(-1, signal.shape[-1])
-            ).reshape(signal.shape)
-        else:
-            signal_scaled = signal
-        
-        # Предсказание
-        predictions = self.model.predict(signal_scaled, verbose=0)
-        
+        # Приведение к форме (1, length, 1)
+        sig_input = np.array(sig)
+        if len(sig_input.shape) == 1:
+            sig_input = sig_input.reshape(1, -1, 1)
+        elif len(sig_input.shape) == 2:
+            sig_input = np.expand_dims(sig_input, axis=-1)
+            
+        preds = self.model.predict(sig_input, verbose=0)
         if return_proba:
-            return predictions[0]
-        else:
-            pred_class = np.argmax(predictions[0])
-            if self.label_encoder:
-                return self.label_encoder.inverse_transform([pred_class])[0]
-            return pred_class
+            return preds[0]
+        
+        idx = np.argmax(preds[0])
+        return self.label_encoder.inverse_transform([idx])[0] if self.label_encoder else idx
+
+    def plot_training_history(self, history):
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 2, 1)
+        plt.plot(history.history['accuracy'], label='Train')
+        plt.plot(history.history['val_accuracy'], label='Val')
+        plt.title('Accuracy')
+        plt.legend()
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(history.history['loss'], label='Train')
+        plt.plot(history.history['val_loss'], label='Val')
+        plt.title('Loss')
+        plt.legend()
+        plt.show()
+[15.03.2026 13:18] Нколаc: def save_model_package(self, filepath):
+        os.makedirs('models', exist_ok=True)
+        self.model.save(f"{filepath}_model.h5")
+        meta = {'input_shape': self.input_shape, 'num_classes': self.num_classes}
+        joblib.dump(meta, f"{filepath}_meta.pkl")
 
 class SignalPreprocessor:
-    """
-    Класс для предобработки сигналов
-    """
-    
     @staticmethod
-    def extract_features(signals):
-        """
-        Извлечение дополнительных признаков из сигналов
-        """
-        features = []
-        
-        for signal in signals:
-            # Основные статистические признаки
-            signal_features = {
-                'mean': np.mean(signal),
-                'std': np.std(signal),
-                'max': np.max(signal),
-                'min': np.min(signal),
-                'peak_to_peak': np.ptp(signal),
-                'rms': np.sqrt(np.mean(signal**2)),
-                'zero_crossings': len(np.where(np.diff(np.signbit(signal)))[0]),
-                'energy': np.sum(signal**2),
-                'entropy': SignalPreprocessor._compute_entropy(signal),
-                'skewness': SignalPreprocessor._compute_skewness(signal),
-                'kurtosis': SignalPreprocessor._compute_kurtosis(signal)
-            }
-            
-            # Частотные признаки
-            freqs, psd = SignalPreprocessor._compute_psd(signal)
-            signal_features['dominant_freq'] = freqs[np.argmax(psd)]
-            signal_features['spectral_centroid'] = np.sum(freqs * psd) / np.sum(psd)
-            
-            features.append(list(signal_features.values()))
-        
-        return np.array(features)
-    
-    @staticmethod
-    def _compute_entropy(signal):
-        """Вычисление энтропии сигнала"""
-        hist, _ = np.histogram(signal, bins=20, density=True)
-        return entropy(hist + 1e-10)
-    
-    @staticmethod
-    def _compute_skewness(signal):
-        """Вычисление асимметрии"""
-        return np.mean((signal - np.mean(signal))**3) / (np.std(signal)**3 + 1e-10)
-    
-    @staticmethod
-    def _compute_kurtosis(signal):
-        """Вычисление эксцесса"""
-        return np.mean((signal - np.mean(signal))**4) / (np.std(signal)**4 + 1e-10)
-    
-    @staticmethod
-    def _compute_psd(signal):
-        """Вычисление спектральной плотности мощности"""
-        freqs = np.fft.fftfreq(len(signal))
-        psd = np.abs(np.fft.fft(signal))**2
-        return freqs[:len(freqs)//2], psd[:len(psd)//2]
-    
-    @staticmethod
-    def augment_signal(signal, augmentation_type='all'):
-        """
-        Расширенная аугментация сигналов
-        """
-        augmented_signals = [signal]
-        
-        if augmentation_type == 'all' or augmentation_type == 'noise':
-            # Разные уровни шума
-            for noise_level in [0.01, 0.02, 0.05, 0.1]:
-                noise = np.random.normal(0, noise_level * np.std(signal), signal.shape)
-                augmented_signals.append(signal + noise)
-        
-        if augmentation_type == 'all' or augmentation_type == 'time_shift':
-            # Временные сдвиги
-            for shift in [-20, -10, -5, 5, 10, 20]:
-                augmented_signals.append(np.roll(signal, shift))
-        
-        if augmentation_type == 'all' or augmentation_type == 'scale':
-            # Масштабирование
-            for scale in [0.7, 0.8, 0.9, 1.1, 1.2, 1.3]:
-                augmented_signals.append(signal * scale)
-        
-        if augmentation_type == 'all' or augmentation_type == 'freq_mask':
-            # Маскирование частот
-            fft_signal = np.fft.fft(signal)
-            for mask_size in [5, 10, 20, 30]:
-                fft_masked = fft_signal.copy()
-                mask_start = np.random.randint(0, len(fft_signal) - mask_size)
-                fft_masked[mask_start:mask_start + mask_size] = 0
-                augmented_signals.append(np.fft.ifft(fft_masked).real)
-        
-        if augmentation_type == 'all' or augmentation_type == 'time_mask':
-            # Маскирование во времени
-            for mask_size in [10, 20, 30]:
-                signal_masked = signal.copy()
-                mask_start = np.random.randint(0, len(signal) - mask_size)
-                signal_masked[mask_start:mask_start + mask_size] = 0
-                augmented_signals.append(signal_masked)
-        
-        return np.array(augmented_signals)
-    
-    @staticmethod
-    def preprocess_signal(signal, sample_rate=1000):
-        """
-        Полная предобработка сигнала
-        """
+    def preprocess_signal(sig_data, sample_rate=1000):
         # Удаление тренда
-        signal_detrended = signal - np.polyval(np.polyfit(range(len(signal)), signal, 1), range(len(signal)))
-        
-        # Фильтрация (низкочастотный фильтр)
-        sos = signal.butter(10, 0.1, 'low', fs=sample_rate, output='sos')
-        signal_filtered = signal.sosfilt(sos, signal_detrended)
-        
+        sig_detrended = sp_signal.detrend(sig_data)
+        # Фильтрация
+        sos = sp_signal.butter(4, 0.1, 'low', fs=sample_rate, output='sos')
+        filtered = sp_signal.sosfilt(sos, sig_detrended)
         # Нормализация
-        signal_normalized = (signal_filtered - np.mean(signal_filtered)) / (np.std(signal_filtered) + 1e-10)
-        
-        return signal_normalized
+        return (filtered - np.mean(filtered)) / (np.std(filtered) + 1e-10)
 
-# Функция для восстановления меток классов
-def restore_labels(df, label_column='label'):
-    """
-    Восстановление меток классов из слабочитаемых строк
-    """
-    import re
+def complete_pipeline(X, y, class_names=None):
+    # 1. Prep
+    X_prep = np.array([SignalPreprocessor.preprocess_signal(s) for s in X])
+    X_prep = np.expand_dims(X_prep, axis=-1) # (N, L, 1) для Conv1D
     
-    def extract_numbers(text):
-        if pd.isna(text):
-            return None
-        # Ищем все числа в строке
-        numbers = re.findall(r'\d+', str(text))
-        if numbers:
-            return int(numbers[0])
-        return None
+    le = LabelEncoder()
+    y_enc = le.fit_transform(y)
     
-    # Восстанавливаем метки
-    df['restored_label'] = df[label_column].apply(extract_numbers)
+    X_train, X_test, y_train, y_test = train_test_split(X_prep, y_enc, test_size=0.2, stratify=y_enc)
     
-    # Проверяем результаты
-    print(f"Восстановлено меток: {df['restored_label'].notna().sum()} из {len(df)}")
+    # 2. Model
+    clf = EnhancedSignalClassifier(input_shape=X_prep.shape[1:], num_classes=len(le.classes_))
+    clf.label_encoder = le
+    clf.model = clf.create_advanced_network(clf.input_shape, clf.num_classes)
     
-    # Удаляем строки с невосстановленными метками
-    df_clean = df.dropna(subset=['restored_label'])
-    df_clean['restored_label'] = df_clean['restored_label'].astype(int)
+    clf.model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
     
-    # Проверяем диапазон классов
-    print(f"Классы: {sorted(df_clean['restored_label'].unique())}")
+    # 3. Train
+    print("Начало обучения...")
+    history = clf.model.fit(
+        X_train, y_train, 
+        validation_split=0.2, 
+        epochs=30, 
+        batch_size=32, 
+        verbose=1,
+        callbacks=[keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)]
+    )
     
-    return df_clean
+    clf.history = history
+    clf.plot_training_history(history)
+    
+    # 4. Eval
+    y_pred = np.argmax(clf.model.predict(X_test), axis=1)
+    print("\nОтчет о классификации:")
+    print(classification_report(y_test, y_pred, target_names=class_names))
+    
+    return clf
 
-# Исправленный полный пайплайн
-def complete_signal_classification_pipeline(X, y, class_names=None, test_size=0.2):
-    """
-    Полный пайплайн классификации сигналов
-    """
-    print("="*60)
-    print("НАЧАЛО КЛАССИФИКАЦИИ СИГНАЛОВ")
-    print("="*60)
-    
-    # 1. Предобработка сигналов
-    print("\n[1/5] Предобработка сигналов...")
-    preprocessed_signals = []
-    for signal in X:
-        preprocessed = SignalPreprocessor.preprocess_signal(signal)
-        preprocessed_signals.append(preprocessed)
-    X = np.array(preprocessed_signals)
-    
-    # 2. Разделение данных
-    print("\n[2/5] Разделение данных...")
-    X_train, X_temp, y_train, y_temp = train_test_split(
-        X, y, test_size=0.3, random_state=42, stratify=y
-    )
-    X_val, X_test, y_val, y_test = train_test_split(
-        X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
-    )
-    
-    print(f"   Обучающая выборка: {len(X_train)} образцов")
-    print(f"   Валидационная выборка: {len(X_val)} образцов")
-    print(f"   Тестовая выборка: {len(X_test)} образцов")
-    
-    # 3. Создание классификатора
-    print("\n[3/5] Создание классификатора...")
-    classifier = EnhancedSignalClassifier()
-    classifier.class_names = class_names
-    
-    # Кодирование меток
-    label_encoder = LabelEncoder()
-    y_train_encoded = label_encoder.fit_transform(y_train)
-    y_val_encoded = label_encoder.transform(y_val)
-    y_test_encoded = label_encoder.transform(y_test)
-    
-    classifier.label_encoder = label_encoder
-    
-    # 4. Нормализация данных
-    print("\n[4/5] Нормализация данных...")
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(
-        X_train.reshape(-1, X_train.shape[-1])
-    ).reshape(X_train.shape)
-    X_val_scaled = scaler.transform(
-        X_val.reshape(-1, X_val.shape[-1])
-    ).reshape(X_val.shape)
-    X_test_scaled = scaler.transform(
-        X_test.reshape(-1, X_test.shape[-1])
-    ).reshape(X_test.shape)
-    
-    classifier.scaler = scaler
-    
-    # 5. Обучение модели
-    print("\n[5/5] Обучение модели...")
-    
-    # Создание модели
-    classifier.model = classifier.create_advanced_network(
-        X.shape[1:], len(np.unique(y_train_encoded))
-    )
-    
-    # Компиляция
-    optimizer = keras.optimizers.AdamW(
-        learning_rate=0.001,
-        weight_decay=0.0001
-    )
-    
-    classifier.model.compile(
-        optimizer=optimizer,
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy', keras.metrics.AUC(name='auc')]
-    )
-    
-    # Колбэки
-    callbacks = [
-        keras.callbacks.EarlyStopping(
-            monitor='val_loss',
-            patience=20,
-            restore_best_weights=True,
-            verbose=1
-        ),
-        keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss',
-            factor=0.5,
-            patience=10,
-            min_lr=0.00001,
-            verbose=1
-        ),
-        keras.callbacks.ModelCheckpoint(
-            'best_model.h5',
-            monitor='val_accuracy',
-            save_best_only=True,
-            verbose=1
-        ),
-        keras.callbacks.CSVLogger('training_log.csv')
-    ]
-    
-    # Обучение
-    history = classifier.model.fit(
-        X_train_scaled, y_train_encoded,
-        validation_data=(X_val_scaled, y_val_encoded),
-        epochs=150,
-        batch_size=32,
-        callbacks=callbacks,
-        verbose=1
-    )
-    
-    classifier.history = history
-    
-    # 6. Оценка модели
-    print("\n" + "="*50)
-    print("ОЦЕНКА МОДЕЛИ")
-    print("="*50)
-    
-    # Оценка на тестовых данных
-    test_loss, test_acc, test_auc = classifier.model.evaluate(
-        X_test_scaled, y_test_encoded, verbose=0
-    )
-    
-    print(f"Точность на тесте: {test_acc:.4f}")
-    print(f"AUC на тесте: {test_auc:.4f}")
-    print(f"Потери на тесте: {test_loss:.4f}")
-    
-    # Детальный отчет
-    y_pred_probs = classifier.model.predict(X_test_scaled)
-    y_pred = np.argmax(y_pred_probs, axis=1)
-    y_pred_labels = label_encoder.inverse_transform(y_pred)
-    
-    print("\nДетальный отчет по классам:")
-    print(classification_report(y_test, y_pred_labels, target_names=class_names))
-    
-    # Визуализация
-    classifier.plot_training_history(history)
-    
-    # Матрица ошибок
-    plt.figure(figsize=(12, 10))
-    from sklearn.metrics import confusion_matrix
-    cm = confusion_matrix(y_test, y_pred_labels, labels=class_names)
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=class_names, yticklabels=class_names)
-    plt.title('Матрица ошибок на тестовой выборке', fontsize=14, fontweight='bold')
-    plt.xlabel('Предсказанный класс', fontsize=12)
-    plt.ylabel('Истинный класс', fontsize=12)
-    plt.tight_layout()
-    plt.savefig('confusion_matrix.png', dpi=150, bbox_inches='tight')
-    plt.show()
-    
-    # Сохранение модели
-    classifier.save_model_package('final_signal_classifier')
-    
-    print("\n" + "="*60)
-    print("КЛАССИФИКАЦИЯ ЗАВЕРШЕНА УСПЕШНО!")
-    print("="*60)
-    
-    return classifier
-
-# Пример использования
-if __name__ == "__main__":
-    import pandas as pd
-    
-    # Генерация тестовых данных
-    print("Генерация тестовых данных...")
-    np.random.seed(42)
-    n_samples = 2000
-    signal_length = 256
-    n_classes = 5
-    
-    # Создание более реалистичных сигналов для разных классов
+if name == "main": # Исправлено на main
+    # Генерация синтетики
+    N, L = 1000, 256
     X = []
     y = []
-    
-    for i in range(n_samples):
-        class_id = i % n_classes
-        
-        if class_id == 0:  # Синусоидальный сигнал
-            t = np.linspace(0, 4*np.pi, signal_length)
-            signal = np.sin(t) + 0.1 * np.random.randn(signal_length)
-        elif class_id == 1:  # Пилообразный сигнал
-            signal = signal.sawtooth(2 * np.pi * 5 * np.linspace(0, 1, signal_length))
-            signal += 0.1 * np.random.randn(signal_length)
-        elif class_id == 2:  # Квадратный сигнал
-            signal = signal.square(2 * np.pi * 5 * np.linspace(0, 1, signal_length))
-            signal += 0.1 * np.random.randn(signal_length)
-        elif class_id == 3:  # Зашумленный сигнал
-            signal = np.random.randn(signal_length) * 0.5
-        else:  # Модулированный сигнал
-            t = np.linspace(0, 1, signal_length)
-            carrier = np.sin(2 * np.pi * 10 * t)
-            modulator = np.sin(2 * np.pi * 1 * t)
-            signal = carrier * (1 + 0.5 * modulator)
-            signal += 0.05 * np.random.randn(signal_length)
-        
-        X.append(signal)
-        y.append(class_id)
+    for i in range(N):
+        label = i % 3
+        t = np.linspace(0, 1, L)
+        if label == 0: sig = np.sin(2 * np.pi * 5 * t)
+        elif label == 1: sig = sp_signal.sawtooth(2 * np.pi * 5 * t)
+        else: sig = np.random.normal(0, 0.5, L)
+        X.append(sig + np.random.normal(0, 0.1, L))
+        y.append(f"Class_{label}")
     
     X = np.array(X)
-    y = np.array(y)
+    classifier = complete_pipeline(X, y, class_names=["Sine", "Sawtooth", "Noise"])
     
-    class_names = [f"Цивилизация_{i}" for i in range(n_classes)]
-    
-    # Запуск пайплайна
-    classifier = complete_signal_classification_pipeline(X, y, class_names)
-    
-    # Пример предсказания для нового сигнала
-    print("\n" + "="*50)
-    print("ТЕСТИРОВАНИЕ ПРЕДСКАЗАНИЯ")
-    print("="*50)
-    
-    # Создаем тестовый сигнал
-    test_signal = np.sin(np.linspace(0, 4*np.pi, signal_length)) + 0.1 * np.random.randn(signal_length)
-    
-    # Предсказание
-    prediction = classifier.predict_signal(test_signal)
-    probabilities = classifier.predict_signal(test_signal, return_proba=True)
-    
-    print(f"Предсказанный класс: {prediction}")
-    print("\nВероятности по классам:")
-    for i, prob in enumerate(probabilities):
-        print(f"  {class_names[i]}: {prob:.4f}")
-        
+    # Тест предсказания
+    test_sig = np.sin(2 * np.pi * 5 * np.linspace(0, 1, L))
+    print(f"Результат теста: {classifier.predict_signal(test_sig)}")
