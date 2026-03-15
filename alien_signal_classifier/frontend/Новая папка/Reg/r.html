@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация</title>
+    <link rel="stylesheet" href="r.css">
+</head>
+<body>
+    <form class="register-form" id="simpleRegisterForm">
+        <h2>Регистрация</h2>
+        
+        <div class="error-message" id="formError"></div>
+        
+        <input type="text" id="regName" placeholder="Имя" required>
+        <input type="text" id="regFam" placeholder="Фамилия" required>
+        <input type="text" id="regLogin" placeholder="Логин" required>
+        <input type="password" id="regPassword" placeholder="Пароль" required>
+        <input type="password" id="regConfirm" placeholder="Подтвердите пароль" required>
+        
+        <button type="submit">Зарегистрироваться</button>
+    </form>
+    
+
+    <script>
+        document.getElementById('simpleRegisterForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const Name = document.getElementById('regName').value;
+            const Fam = document.getElementById('regFam').value;
+            const login = document.getElementById('regLogin').value;
+            const password = document.getElementById('regPassword').value;
+            const confirm = document.getElementById('regConfirm').value;
+            const errorDiv = document.getElementById('formError');
+            
+            if (login.length < 3) {
+                errorDiv.textContent = 'Логин должен быть минимум 3 символа';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            if (password.length < 6) {
+                errorDiv.textContent = 'Пароль должен быть минимум 6 символов';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            if (password !== confirm) {
+                errorDiv.textContent = 'Пароли не совпадают';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            errorDiv.style.display = 'none';
+            
+            // Здесь отправка данных на сервер
+            console.log('Регистрация:', { login, password });
+            alert('Регистрация успешна! (демо-режим)');
+            
+            this.reset();
+        });
+    </script>
+</body>
+</html>

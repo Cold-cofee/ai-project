@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Загрузка файла</title>
+    <link rel="stylesheet" href="a.css">
+ 
+</head>
+
+
+<body>
+    <div class="main-container">
+        <div class="upload-container">
+            <h1>Загрузить файл</h1>
+            
+            <div class="upload-button">
+                <input type="file" id="fileInput" accept="*/*">
+                <label for="fileInput">Выберите файл</label>
+            </div>
+    
+            <div class="selected-file" id="selectedFileName"></div>
+            
+            <div class="status-message" id="statusMessage"></div>
+            
+            <div class="progress-bar" id="progressBar">
+                <div class="progress" id="progress"></div>
+            </div>
+    
+        </div>
+    </div>
+
+
+
+    
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const statusMessage = document.getElementById('statusMessage');
+        const progressBar = document.getElementById('progressBar');
+        const progress = document.getElementById('progress');
+        const selectedFileName = document.getElementById('selectedFileName');
+
+        fileInput.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            
+            if (!file) {
+                return;
+            }
+
+            // Показываем имя выбранного файла
+            selectedFileName.textContent = `Выбран файл: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`;
+
+            // Создаем FormData и добавляем файл
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Показываем статус загрузки
+            statusMessage.className = 'status-message uploading';
+            statusMessage.textContent = 'Загрузка...';
+            progressBar.style.display = 'block';
+
+            try {
+                // Отправляем файл на бэкенд
+                // ЗАМЕНИТЕ URL НА АДРЕС ВАШЕГО БЭКЕНДА
+                const response = await fetch('http://localhost:3000/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Ошибка сервера: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                // Показываем успешный результат
+                statusMessage.className = 'status-message success';
+                statusMessage.textContent = 'Файл успешно загружен!';
+                
+                // Сбрасываем прогресс
+                progress.style.width = '100%';
+                
+                // Очищаем выбор файла через 3 секунды
+                setTimeout(() => {
+                    statusMessage.style.display = 'none';
+                    progressBar.style.display = 'none';
+                    selectedFileName.textContent = '';
+                    fileInput.value = ''; // Сбрасываем input
+                }, 3000);
+
+            } catch (error) {
+                console.error('Ошибка:', error);
+                
+                // Показываем ошибку
+                statusMessage.className = 'status-message error';
+                statusMessage.textContent = `Ошибка при загрузке: ${error.message}`;
+                progressBar.style.display = 'none';
+                
+                // Очищаем сообщение об ошибке через 5 секунд
+                setTimeout(() => {
+                    statusMessage.style.display = 'none';
+                    selectedFileName.textContent = '';
+                }, 5000);
+            }
+        });
+
+        // Добавляем эффект перетаскивания (drag & drop)
+        const container = document.querySelector('.upload-container');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            container.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            container.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            container.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            container.style.transform = 'scale(1.02)';
+            container.style.boxShadow = '0 30px 70px rgba(102, 126, 234, 0.5)';
+        }
+
+        function unhighlight() {
+            container.style.transform = 'scale(1)';
+            container.style.boxShadow = '0 20px 60px rgba(0, 0, 0, 0.3)';
+        }
+
+        container.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+
+            if (files.length > 0) {
+                fileInput.files = files;
+                // Триггерим событие change вручную
+                const event = new Event('change', { bubbles: true });
+                fileInput.dispatchEvent(event);
+            }
+        }
+    </script>
+</body>
+</html>
